@@ -1,0 +1,136 @@
+---
+title: "Appendix 1"
+  
+output:
+  pdf_document: default
+  html_notebook: default
+editor_options:
+  chunk_output_type: console
+---
+## Analysis output for "Alcohol, cannabis, and nicotine use have common and distinct associations with COVID-19 pandemic-related experiences : A Bayesian network analysis across two timepoints"
+
+```{r, echo = F}
+# formatting
+library(knitr)
+opts_chunk$set(tidy.opts = list(width.cutoff = 78), tidy = TRUE)
+```
+
+### This manuscript uses data from waves 9 and 16 of the COVID-Dynamic Longitudinal Study (https://coviddynamic.caltech.edu/) because those are the only waves in which both of the assessments of interest were collected (i.e., the EPII and the Monthly Substance Use Questionnaire)
+### The full assessment schedule is here: https://coviddynamic.caltech.edu/documents/20311/table_W1-17_color.pdf
+### The data and code are in this github repository: https://github.com/papinisan/covid-substanceuse-network
+
+# 1. Set-up
+```{r set-up}
+# load packages
+library(pacman)
+p_load(table1, BGGM, qgraph)
+
+# load data
+df_raw <- readRDS("df_epii_mosu_916.rds")
+```
+
+# 2. Check raw data and create dataframe for analysis
+```{r check-data}
+# number of unique participants
+length(unique(df_raw$CVDID))
+
+# number of unique participants after removing waves in which attention checks were failed
+df_raw <- df_raw[df_raw$failed == 0,]
+length(unique(df_raw$CVDID))
+
+# list of all participants
+list_pts <- unique(df_raw$CVDID)
+
+# create long dataframe that includes rows for participants who missed 1 of the 2 waves
+df_pts <- data.frame(CVDID = rep(unlist(list_pts), 2), 
+                     wave =rep(c(9, 16), each = length(list_pts)))
+df <- merge(df_pts, df_raw, by = c("CVDID", "wave"), all.x = TRUE)
+
+# list of nodes that will appear in the network analyses
+list_nodes <- names(df[, grepl("_use|epii", names(df))])
+name_nodes <- c("cannabis\nuse", "alcohol\nuse", "nicotine\nuse", "work\nimpact", 
+                "home\nimpact","social\nimpact", "economic\nimpact", "emotional\nimpact", 
+                "physical\nimpact", "infection\nisolation", "positive\nimpact")
+
+# create subsets for waves 9 and 16
+df9 <- df[df$wave == 9, list_nodes]
+df16 <- df[df$wave == 16, list_nodes]
+```
+
+# 3. Demographic characteristics reported in the main text
+1= Some high school; 2 = High school; 3 = Some college; 4 = Associate's degree; 5 = Bachelor's degree; 6 = Some graduate education; 7 = Master's degree; 8 = PhD; 9 = Professional degree
+```{r demographics, warning = FALSE}
+table1(~ female + age + hispanic + race + education, 
+       data = df_raw[duplicated(df_raw$CVDID) == FALSE,])
+```
+
+# 4. Descriptive statistics of network variables for Table 1
+```{r table-1, warning = FALSE}
+table1(~ alc_use + mj_use + nic_use + epii_work + epii_home + epii_social + epii_economic + epii_emotional + epii_physical + epii_infection_isolation + epii_positive | wave, data = df)
+```
+
+# 5. Run Bayesian Graphical Gaussian Network analyses
+```{r bggm}
+results_compare_est <- ggm_compare_estimate(df16, df9, impute = TRUE, seed = 2022, progress = FALSE)
+summary_compare_est <- summary(results_compare_est)
+```
+
+# 6. T1 (wave 9) network
+```{r t1-network}
+# select edges with credible intervals that do not overlap with 0
+edges_t1 <- select(results_compare_est$post_samp[[2]], cred = .95)
+
+# pcor matrix for network graph
+pcor_t1 <- edges_t1$pcor_adj
+
+# network plot
+qgraph(pcor_t1, fade = T, palette = "colorblind", labels = name_nodes, negDashed = TRUE, esize = 20, cut = .05, vsize = 15, color = c(rep("#97C1A9", 3), rep("#78AED3", 8)), title = "A) July 2020")
+
+# edge values
+edges95ci_t1 <- summary(results_compare_est$post_samp[[2]], cred = .95)$dat_results
+edges95ci_t1
+
+# links between substance use and pandemic-experiences
+substance_edges95ci_t1 <- edges95ci_t1[grepl("mj|nic|alc", edges95ci_t1$Relation), ]
+substance_edges95ci_t1[order(substance_edges95ci_t1$Post.mean, decreasing = TRUE),]
+```
+
+# 7. T2 (wave 16) network
+```{r t2-network}
+# select edges with credible intervals that do not overlap with 0
+edges_t2 <- select(results_compare_est$post_samp[[1]], cred = .95)
+
+# pcor matrix for network graph
+pcor_t2 <- edges_t2$pcor_adj
+
+# network plot
+qgraph(pcor_t2, fade = T, palette = "colorblind", labels = name_nodes, negDashed = TRUE, esize = 20, cut = .05, vsize = 15, color = c(rep("#97C1A9", 3), rep("#78AED3", 8)), title = "B) January 2021")
+
+# edge values
+edges95ci_t2 <- summary(results_compare_est$post_samp[[1]], cred = .95)$dat_results
+edges95ci_t2
+
+# links between substance use and pandemic-experiences
+substance_edges95ci_t2 <- edges95ci_t2[grepl("mj|nic|alc", edges95ci_t2$Relation), ]
+substance_edges95ci_t2[order(substance_edges95ci_t2$Post.mean, decreasing = TRUE),]
+```
+
+# 8. Export Figure 1
+```{r fig1, message = FALSE}
+png("figure1.png", width = 6.5, height = 3.25, units = "in", res = 300)
+layout(t(1:2))
+qgraph(pcor_t1, fade = T, palette = "colorblind", labels = name_nodes, negDashed = TRUE, esize = 20, cut = .05, vsize = 15, color = c(rep("#97C1A9", 3), rep("#78AED3", 8)), title = "A) July 2020")
+qgraph(pcor_t2, fade = T, palette = "colorblind", labels = name_nodes, negDashed = TRUE, esize = 20, cut = .05, vsize = 15, color = c(rep("#97C1A9", 3), rep("#78AED3", 8)), title = "B) January 2021")
+dev.off()
+```
+
+# 9. Compare network edges
+```{r compare-networks}
+summary_compare_est$dat_results
+plot(summary_compare_est)
+```
+
+# 10. Environment information
+```{r session-info}
+sessionInfo()
+```
